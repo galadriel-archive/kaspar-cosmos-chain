@@ -13,6 +13,7 @@ import (
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
 
+	_ "cosmossdk.io/api/cosmos/tx/config/v1" // import for side-effects
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -23,22 +24,22 @@ import (
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	_ "github.com/cosmos/cosmos-sdk/x/auth" // import for side-effects
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
+	_ "github.com/cosmos/cosmos-sdk/x/auth/tx/config" // import for side-effects
+	_ "github.com/cosmos/cosmos-sdk/x/bank"           // import for side-effects
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
+	_ "github.com/cosmos/cosmos-sdk/x/consensus" // import for side-effects
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
+	_ "github.com/cosmos/cosmos-sdk/x/distribution" // import for side-effects
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
+	_ "github.com/cosmos/cosmos-sdk/x/mint"    // import for side-effects
+	_ "github.com/cosmos/cosmos-sdk/x/staking" // import for side-effects
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
-
-	_ "cosmossdk.io/api/cosmos/tx/config/v1"          // import for side-effects
-	_ "github.com/cosmos/cosmos-sdk/x/auth"           // import for side-effects
-	_ "github.com/cosmos/cosmos-sdk/x/auth/tx/config" // import for side-effects
-	_ "github.com/cosmos/cosmos-sdk/x/bank"           // import for side-effects
-	_ "github.com/cosmos/cosmos-sdk/x/consensus"      // import for side-effects
-	_ "github.com/cosmos/cosmos-sdk/x/distribution"   // import for side-effects
-	_ "github.com/cosmos/cosmos-sdk/x/mint"           // import for side-effects
-	_ "github.com/cosmos/cosmos-sdk/x/staking"        // import for side-effects
+	gpupoolkeeper "github.com/galadriel/gpupool/keeper"
+	_ "github.com/galadriel/gpupool/module"
 )
 
 // DefaultNodeHome default home directories for the application daemon
@@ -68,9 +69,11 @@ type MiniApp struct {
 	StakingKeeper         *stakingkeeper.Keeper
 	DistrKeeper           distrkeeper.Keeper
 	ConsensusParamsKeeper consensuskeeper.Keeper
+	GpuPoolKeeper         gpupoolkeeper.Keeper
 
 	// simulation manager
 	sm *module.SimulationManager
+	mm *module.Manager
 }
 
 func init() {
@@ -109,9 +112,11 @@ func NewMiniApp(
 		appBuilder *runtime.AppBuilder
 	)
 
+	var appConfig = AppConfig()
+
 	if err := depinject.Inject(
 		depinject.Configs(
-			AppConfig(),
+			appConfig,
 			depinject.Supply(
 				logger,
 				appOpts,
@@ -127,6 +132,7 @@ func NewMiniApp(
 		&app.StakingKeeper,
 		&app.DistrKeeper,
 		&app.ConsensusParamsKeeper,
+		&app.GpuPoolKeeper,
 	); err != nil {
 		return nil, err
 	}
@@ -145,12 +151,35 @@ func NewMiniApp(
 	app.sm = module.NewSimulationManagerFromAppModules(app.ModuleManager.Modules, make(map[string]module.AppModuleSimulation, 0))
 	app.sm.RegisterStoreDecoders()
 
+	app.mm = module.NewManager()
+	app.mm.SetOrderEndBlockers("gpupool")
+
+	// app.setCustomAnteHandler()
+
 	if err := app.Load(loadLatest); err != nil {
 		return nil, err
 	}
 
 	return app, nil
 }
+
+/*func (app *MiniApp) setCustomAnteHandler() {
+	anteHandler, err := NewAnteHandler(
+		HandlerOptions{
+			ante.HandlerOptions{
+				BankKeeper:      app.BankKeeper,
+				SignModeHandler: app.txConfig.SignModeHandler(),
+				SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
+			},
+		},
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// Set the AnteHandler for the app
+	app.SetAnteHandler(anteHandler)
+}*/
 
 // LegacyAmino returns MiniApp's amino codec.
 func (app *MiniApp) LegacyAmino() *codec.LegacyAmino {
